@@ -1,0 +1,41 @@
+---
+- name: Deploy Node.js app locally
+  hosts: local
+  vars:
+    app_dir: /opt/deployments
+    repo_url: "https://github.com/Hazzimov/todoAppNode"
+
+  tasks:
+    - name: Clone repository
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: main
+        force: yes
+
+    - name: Install Node.js dependencies
+      ansible.builtin.command: npm install
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Build Node.js app
+      ansible.builtin.command: npm run build
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Start Node.js app
+      ansible.builtin.command: npm run dev
+      args:
+        chdir: "{{ app_dir }}"
+      async: 30
+      poll: 0
+      register: app_job
+
+    - name: Wait a few seconds for the app to start
+      ansible.builtin.pause:
+        seconds: 60
+        prompt: "Waiting for the Node.js app to start..."
+
+    - name: Show job details
+      ansible.builtin.debug:
+        var: app_job
