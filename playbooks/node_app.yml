@@ -1,41 +1,77 @@
 ---
-- name: Deploy Node.js app locally
-  hosts: local
+- name: Deploy Node.js app persistently under Jenkins
+  hosts: localhost
+  become: yes
   vars:
-    app_dir: /opt/deployments
-    repo_url: "https://github.com/Hazzimov/todoAppNode"
+    app_dir: /opt/deployments/todoAppNode
+    artifact_url: "https://github.com/Hazzimov/todoAppNode/releases/download/v1.0.0/todoAppNode.tar.gz"
+    artifact_file: "/tmp/todoAppNode.tar.gz"
+    app_user: jenkins
+    app_home: /var/lib/jenkins
 
   tasks:
-    - name: Clone repository
-      ansible.builtin.git:
-        repo: "{{ repo_url }}"
+    - name: Ensure Node.js and npm are installed
+      ansible.builtin.package:
+        name:
+          - nodejs
+          - npm
+        state: present
+
+    - name: Ensure PM2 is installed globally
+      ansible.builtin.command: npm install -g pm2
+      args:
+        creates: /usr/local/bin/pm2
+
+    - name: Create app directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0755'
+        recurse: yes
+
+    - name: Download Node.js app artifact
+      ansible.builtin.get_url:
+        url: "{{ artifact_url }}"
+        dest: "{{ artifact_file }}"
+        mode: '0644'
+        force: yes   # always overwrite to avoid 304 Not Modified
+
+    - name: Extract artifact
+      ansible.builtin.unarchive:
+        src: "{{ artifact_file }}"
         dest: "{{ app_dir }}"
-        version: main
-        force: yes
+        remote_src: yes
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
 
     - name: Install Node.js dependencies
       ansible.builtin.command: npm install
       args:
         chdir: "{{ app_dir }}"
+      become_user: "{{ app_user }}"
 
     - name: Build Node.js app
       ansible.builtin.command: npm run build
       args:
         chdir: "{{ app_dir }}"
+      become_user: "{{ app_user }}"
 
-    - name: Start Node.js app
-      ansible.builtin.command: npm run dev
+    - name: Start or restart Node.js app with PM2
+      ansible.builtin.shell: |
+        if pm2 describe todoAppNode > /dev/null 2>&1; then
+          pm2 restart todoAppNode
+        else
+          pm2 start npm --name "todoAppNode" -- run dev
+        fi
       args:
         chdir: "{{ app_dir }}"
-      async: 30
-      poll: 0
-      register: app_job
+      become_user: "{{ app_user }}"
 
-    - name: Wait a few seconds for the app to start
-      ansible.builtin.pause:
-        seconds: 60
-        prompt: "Waiting for the Node.js app to start..."
+    - name: Save PM2 process list
+      ansible.builtin.command: pm2 save
+      become_user: "{{ app_user }}"
 
-    - name: Show job details
-      ansible.builtin.debug:
-        var: app_job
+    - name: Configure PM2 startup via systemd
+      ansible.builtin.command: sudo env PATH=$PATH:/usr/local/bin pm2 startup systemd -u {{ app_user }} --hp {{ app_home }}

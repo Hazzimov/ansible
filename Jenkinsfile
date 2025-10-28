@@ -7,18 +7,7 @@ pipeline {
                 git branch: 'main', url: 'https://github.com/Hazzimov/ansible'
             }
         }
-
-        stage('Install Ansible') {
-            steps {
-                sh '''
-                if ! command -v ansible >/dev/null 2>&1; then
-                    sudo apt update -y
-                    sudo apt install -y ansible
-                fi
-                '''
-            }
-        }
-
+        
         stage('Run Ansible Playbook') {
             steps {
                 sh '''
